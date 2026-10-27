@@ -179,7 +179,7 @@ wss.on('connection', (ws) => {
         previewing = true;
         try {
           const i = await resolve(url);
-          say({ type: 'preview', url, info: { title: i.title, uploader: i.uploader, duration: i.duration, live: i.live, site: i.site, thumb: thumbPath(i.thumb) } });
+          say({ type: 'preview', url, info: { title: i.title, uploader: i.uploader, duration: i.duration, live: i.live, site: i.site, thumb: thumbPath(i.thumb), playlist: Boolean(i.playlist), count: i.count || 0 } });
         } catch (e) {
           say({ type: 'preview', url, error: e.message });
         } finally {

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>CinemaRoom</title>
-<link rel="stylesheet" href="style.css?v=2">
+<link rel="stylesheet" href="style.css?v=4">
 </head>
 <body>
 <div id="stage">
@@ -22,7 +22,7 @@
   <div id="bottom" class="bar">
     <input id="seek" type="range" min="0" max="1000" value="0" step="1">
     <div class="row">
-      <button id="btn-prev" class="icon" title="上一個">⏮</button>
+      <button id="btn-prev" class="icon" title="從頭播放">⏮</button>
       <button id="btn-play" class="icon" title="播放／暫停">▶</button>
       <button id="btn-next" class="icon" title="下一個">⏭</button>
       <span id="time">0:00 / 0:00</span>
@@ -48,13 +48,14 @@
   <aside id="queue" hidden>
     <div class="qhead"><b>播放清單</b><button id="btn-close" class="icon" title="關閉">✕</button></div>
     <form id="add">
-      <input id="add-url" type="url" placeholder="貼上 B站／niconico 影片或直播、YouTube 直播的網址" autocomplete="off" required>
+      <input id="add-url" type="url" placeholder="貼上影片、直播或播放清單的網址（B站／niconico／YouTube 直播）" autocomplete="off" required>
       <button type="submit" class="pill on">加入</button>
     </form>
     <div id="preview" hidden>
       <div class="th" id="pv-th"></div>
       <div class="pv-body"><div class="t" id="pv-title"></div><div class="s" id="pv-meta"></div></div>
     </div>
+    <div id="qgroup" hidden><button id="qgroup-back" class="pill">← 返回</button><b id="qgroup-title"></b></div>
     <ol id="items"></ol>
     <div id="hint">誰都可以加入、跳過、暫停，大家看到的是同一個畫面。</div>
   </aside>
@@ -62,6 +63,6 @@
   <div id="toast" hidden></div>
 </div>
 <script src="vendor/hls.min.js?v=1"></script>
-<script type="module" src="app.js?v=2"></script>
+<script type="module" src="app.js?v=5"></script>
 </body>
 </html>

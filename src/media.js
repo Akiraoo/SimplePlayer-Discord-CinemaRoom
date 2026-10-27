@@ -123,13 +123,13 @@ export function resolve(url) {
 }
 
 async function lookUp(url) {
-  const out = await run(['-J', '--write-subs', '--sub-langs', 'danmaku,comments', '-f', formatSelector(false), '--', url]);
+  // --flat-playlist: a playlist link only lists its videos (each is looked up when it plays)
+  const out = await run([
+    '-J', '--flat-playlist', '--playlist-end', String(config.maxPlaylist),
+    '--write-subs', '--sub-langs', 'danmaku,comments', '-f', formatSelector(false), '--', url,
+  ]);
   const info = JSON.parse(out);
-  if (info._type === 'playlist') {
-    const first = (info.entries || []).find(Boolean);
-    if (!first) throw new Error('這個連結裡沒有影片');
-    if (first.url && first.url !== url) return resolve(first.webpage_url || first.url);
-  }
+  if (info._type === 'playlist') return playlistSummary(url, info);
   const live = info.is_live === true || info.live_status === 'is_live';
   if (info.live_status === 'is_upcoming') throw new Error('直播還沒開始');
   const site = siteOf(info);
@@ -155,6 +155,36 @@ async function lookUp(url) {
     liveComments,
   };
   remember([url, page], out, summary);
+  return summary;
+}
+
+function pickThumb(info) {
+  return [info.thumbnail, ...(info.thumbnails || []).map((t) => t.url).reverse()].find((t) => /^https:\/\//.test(t || '')) || null;
+}
+
+/** A playlist (mylist, series, collection, YouTube list…): its title and videos. */
+function playlistSummary(url, info) {
+  const entries = (info.entries || [])
+    .filter((e) => e && /^https?:\/\//.test(e.webpage_url || e.url || ''))
+    .slice(0, config.maxPlaylist)
+    .map((e) => ({
+      url: e.webpage_url || e.url,
+      title: String(e.title || e.webpage_url || e.url).slice(0, 200),
+      duration: Number(e.duration) || 0,
+      thumb: pickThumb(e),
+    }));
+  if (!entries.length) throw new Error('這個播放清單裡沒有影片（或需要登入）');
+  const summary = {
+    playlist: true,
+    url: info.webpage_url || url,
+    title: String(info.title || (info.uploader ? `${info.uploader} 的影片` : url)).slice(0, 200),
+    uploader: String(info.uploader || info.channel || '').slice(0, 80),
+    site: siteOf(info),
+    thumb: pickThumb(info) || entries.find((e) => e.thumb)?.thumb || null,
+    count: entries.length,
+    entries,
+  };
+  remember([url], '', summary);
   return summary;
 }
 
@@ -278,11 +308,13 @@ export class Job {
         this.set(this.live && this.state === 'ready' ? 'done' : 'error', why);
       }
     });
-    // ready once a few segments exist (a live stream needs a little more to start smoothly)
-    const need = this.live ? 3 : 2;
+    // ready once there is a lead to play from: ~12 s of a video, ~10 s of a live stream
+    // (starting on the first segment means catching up with the download and stalling)
+    const need = this.live ? 5 : 6;
     this.timer = setInterval(() => {
       if (this.state === 'starting' && this.segments() >= need) this.set('ready');
     }, 400);
+    // (a short video that is already complete counts as ready via 'done')
     return this;
   }
 

@@ -7,7 +7,7 @@
   --accent: #f2a65a;
   --accent-text: #1b1206;
   --dm-scale: 1;
-  --dm-opacity: 0.9;
+  --dm-opacity: 0.65;
 }
 
 * { box-sizing: border-box; }
@@ -160,6 +160,9 @@ input[type=range] { accent-color: var(--accent); }
 }
 #add-url:focus { outline: none; border-color: var(--accent); }
 #items { list-style: none; margin: 0; padding: 0; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 6px; }
+#qgroup { display: flex; align-items: center; gap: 8px; min-width: 0; }
+#qgroup b { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#items .tools { display: flex; gap: 2px; }
 #items li {
   display: grid;
   grid-template-columns: 64px 1fr auto;

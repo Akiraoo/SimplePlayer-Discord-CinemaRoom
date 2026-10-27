@@ -22,6 +22,8 @@ export const config = {
   // empty = any server; otherwise only these guild (server) IDs may use it
   allowedGuilds: String(env.ALLOWED_GUILDS || '').split(/[\s,]+/).filter(Boolean),
   maxQueue: num(env.MAX_QUEUE, 50),
+  // most videos taken from one playlist link
+  maxPlaylist: num(env.MAX_PLAYLIST, 200),
   devToken: env.DEV_TOKEN || '',
 };
 

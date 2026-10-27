@@ -1,7 +1,7 @@
 // The Activity page: Discord sign-in, the room connection, the synced player and the
 // comment overlay. The server decides what plays and where; this page follows it.
 
-import { Danmaku } from './danmaku.js?v=2';
+import { Danmaku } from './danmaku.js?v=4';
 
 const $ = (id) => document.getElementById(id);
 const video = $('video');
@@ -164,7 +164,14 @@ function fmt(sec) {
   return h ? `${h}:${String(m).padStart(2, '0')}:${s}` : `${m}:${s}`;
 }
 
+let lastSeek = null;
+let snap = false; // someone moved the position: jump there instead of easing
+
 function onState(s) {
+  if (s.seek !== lastSeek) {
+    lastSeek = s.seek;
+    snap = true;
+  }
   state = s;
   state.recv = serverNow();
   const cur = s.queue[s.index] || null;
@@ -197,47 +204,117 @@ function onState(s) {
   sync();
 }
 
+// The list: single videos and playlists at the top; a playlist opens to show its videos.
+let openGroup = null; // playlist being looked at
+
+function row({ thumb, title, meta, badge, live, cur, err, onClick, buttons }) {
+  const li = document.createElement('li');
+  if (cur) li.className = 'cur';
+  const th = document.createElement('div');
+  th.className = 'th';
+  if (thumb) th.style.backgroundImage = `url("${thumb}")`;
+  const mid = document.createElement('div');
+  const t = document.createElement('div');
+  t.className = 't';
+  t.textContent = title;
+  const st = document.createElement('div');
+  st.className = 's';
+  if (badge) {
+    const b = document.createElement('span');
+    b.className = live ? 'badge live' : 'badge';
+    b.textContent = badge;
+    st.append(b);
+  }
+  if (err) {
+    const e = document.createElement('span');
+    e.className = 'err';
+    e.textContent = err;
+    st.append(e);
+  } else st.append(document.createTextNode(meta || ''));
+  mid.append(t, st);
+  const tools = document.createElement('div');
+  tools.className = 'tools';
+  for (const [label, title2, fn] of buttons) {
+    const x = document.createElement('button');
+    x.className = 'x';
+    x.textContent = label;
+    x.title = title2;
+    x.onclick = (ev) => {
+      ev.stopPropagation();
+      fn();
+    };
+    tools.append(x);
+  }
+  li.append(th, mid, tools);
+  li.onclick = onClick;
+  return li;
+}
+
+function videoRow(it, i, s, inGroup) {
+  const buttons = [];
+  if (inGroup) {
+    buttons.push(['↑', '上移', () => sendCmd({ type: 'move', key: it.key, dir: -1 })]);
+    buttons.push(['↓', '下移', () => sendCmd({ type: 'move', key: it.key, dir: 1 })]);
+  }
+  buttons.push(['✕', '移除', () => sendCmd({ type: 'remove', key: it.key })]);
+  return row({
+    thumb: it.thumb,
+    title: it.title,
+    badge: it.live ? 'LIVE' : SITE[it.site] || it.site || '…',
+    live: it.live,
+    meta: `${it.status === 'resolving' ? '讀取中… · ' : ''}${it.duration ? fmt(it.duration) + ' · ' : ''}${it.by || ''}`,
+    err: it.status === 'error' ? shortError(it.error) || '錯誤' : '',
+    cur: i === s.index,
+    onClick: () => i !== s.index && sendCmd({ type: 'jump', key: it.key }),
+    buttons,
+  });
+}
+
 function renderQueue(s) {
   const ol = $('items');
-  ol.replaceChildren(
-    ...s.queue.map((it, i) => {
-      const li = document.createElement('li');
-      if (i === s.index) li.className = 'cur';
-      const th = document.createElement('div');
-      th.className = 'th';
-      if (it.thumb) th.style.backgroundImage = `url("${it.thumb}")`;
-      const mid = document.createElement('div');
-      const t = document.createElement('div');
-      t.className = 't';
-      t.textContent = it.title;
-      const st = document.createElement('div');
-      st.className = 's';
-      const badge = document.createElement('span');
-      badge.className = it.live ? 'badge live' : 'badge';
-      badge.textContent = it.live ? 'LIVE' : SITE[it.site] || it.site || '…';
-      st.append(badge);
-      if (it.status === 'error') {
-        const e = document.createElement('span');
-        e.className = 'err';
-        e.textContent = shortError(it.error) || '錯誤';
-        st.append(e);
-      } else {
-        st.append(document.createTextNode(`${it.duration ? fmt(it.duration) + ' · ' : ''}${it.by || ''}`));
-      }
-      mid.append(t, st);
-      const x = document.createElement('button');
-      x.className = 'x';
-      x.textContent = '✕';
-      x.title = '移除';
-      x.onclick = (e) => {
-        e.stopPropagation();
-        sendCmd({ type: 'remove', key: it.key });
-      };
-      li.append(th, mid, x);
-      li.onclick = () => i !== s.index && sendCmd({ type: 'jump', key: it.key });
+  const groups = s.groups || {};
+  if (openGroup && !groups[openGroup]) openGroup = null;
+  const head = $('qgroup');
+  head.hidden = !openGroup;
+  if (openGroup) {
+    // inside one playlist: its videos, which can be played, moved and removed
+    const g = groups[openGroup];
+    const members = s.queue.map((it, i) => [it, i]).filter(([it]) => it.group === openGroup);
+    $('qgroup-title').textContent = `${g.title}（${members.length}）`;
+    ol.replaceChildren(...members.map(([it, i], n) => {
+      const li = videoRow(it, i, s, true);
+      li.querySelector('.t').textContent = `${n + 1}. ${it.title}`;
       return li;
-    }),
-  );
+    }));
+    return;
+  }
+  const out = [];
+  const seen = new Set();
+  s.queue.forEach((it, i) => {
+    if (!it.group) return out.push(videoRow(it, i, s, false));
+    if (seen.has(it.group)) return;
+    seen.add(it.group);
+    const g = groups[it.group] || { title: '播放清單' };
+    const members = s.queue.filter((x) => x.group === it.group);
+    const curPos = members.findIndex((x) => s.queue.indexOf(x) === s.index);
+    const total = members.reduce((n, x) => n + (x.duration || 0), 0);
+    const gkey = it.group;
+    out.push(
+      row({
+        thumb: g.thumb || members[0].thumb,
+        title: g.title,
+        badge: '清單',
+        meta: `${members.length} 部${total ? ' · ' + fmt(total) : ''}${curPos >= 0 ? ` · 播放中 ${curPos + 1}/${members.length}` : ''} · ${g.by || ''}`,
+        cur: curPos >= 0,
+        onClick: () => {
+          openGroup = gkey;
+          renderQueue(state);
+        },
+        buttons: [['✕', '移除整個清單', () => sendCmd({ type: 'remove-group', group: gkey })]],
+      }),
+    );
+  });
+  ol.replaceChildren(...out);
 }
 
 /* ---------- player ---------- */
@@ -254,8 +331,11 @@ function load(src, item) {
   if (window.Hls?.isSupported()) {
     hls = new window.Hls({
       lowLatencyMode: false,
-      liveSyncDurationCount: 3,
-      maxBufferLength: live ? 12 : 30,
+      // a live stream plays ~8 s behind the newest segment: room for network hiccups
+      liveSyncDurationCount: 4,
+      maxBufferLength: live ? 20 : 60,
+      maxMaxBufferLength: live ? 30 : 120,
+      maxBufferHole: 1,
       backBufferLength: 30,
       // a video still being prepared: its playlist grows, keep asking for it
       manifestLoadingMaxRetry: 6,
@@ -311,11 +391,25 @@ function sync() {
   }
   const want = target();
   const drift = video.currentTime - want;
-  if (Math.abs(drift) > 1.5 || (!state.playing && Math.abs(drift) > 0.3)) {
+  if (!state.playing) {
+    if (Math.abs(drift) > 0.3) video.currentTime = want;
+    video.playbackRate = 1;
+    return;
+  }
+  if (snap) {
+    snap = false;
+    if (Math.abs(drift) > 0.3) video.currentTime = want;
+    video.playbackRate = 1;
+    return;
+  }
+  // still buffering: let it load instead of jumping around (that only stalls it longer)
+  if (video.readyState < 3) return;
+  if (drift > 2 || drift < -6) {
+    // far off (a seek by someone, or this viewer fell well behind): jump
     video.currentTime = want;
     video.playbackRate = 1;
-  } else if (state.playing && Math.abs(drift) > 0.25) {
-    // small differences: catch up gently instead of jumping
+  } else if (Math.abs(drift) > 0.3) {
+    // a little off: catch up gently
     video.playbackRate = drift > 0 ? 0.95 : 1.05;
   } else video.playbackRate = 1;
 }
@@ -365,6 +459,10 @@ $('btn-prev').onclick = () => sendCmd({ type: 'prev' });
 $('btn-queue').onclick = () => {
   $('queue').hidden = !$('queue').hidden;
   if (!$('queue').hidden) $('add-url').focus();
+};
+$('qgroup-back').onclick = () => {
+  openGroup = null;
+  renderQueue(state);
 };
 $('btn-close').onclick = () => {
   $('queue').hidden = true;
@@ -418,6 +516,11 @@ function showPreview(msg) {
   const i = msg.info;
   $('pv-th').style.backgroundImage = i.thumb ? `url("${i.thumb}")` : '';
   $('pv-title').textContent = i.title;
+  if (i.playlist) {
+    $('pv-meta').textContent = [`📂 播放清單 · ${i.count} 部`, SITE[i.site] || i.site, i.uploader].filter(Boolean).join(' · ');
+    $('pv-meta').className = 's';
+    return;
+  }
   const site = SITE[i.site] || i.site || '';
   $('pv-meta').textContent = [i.live ? '🔴 直播中' : site, i.live ? site : i.duration ? fmt(i.duration) : '', i.uploader]
     .filter(Boolean)
@@ -439,7 +542,7 @@ dm.chatMode = store.get('chatMode', 'panel');
 const chatLabel = () => ($('btn-chatmode').textContent = dm.chatMode === 'panel' ? '側邊' : '彈幕');
 chatLabel();
 // comment look: size, opacity, how much of the screen they may cover (per viewer)
-const dmStyle = { scale: store.get('dmScale', 1), opacity: store.get('dmOpacity', 0.9), area: store.get('dmArea', 0.75) };
+const dmStyle = { scale: store.get('dmScale', 1), opacity: store.get('dmOpacity', 0.65), area: store.get('dmArea', 0.5) };
 function applyDmStyle() {
   dm.setStyle(dmStyle);
   $('dm-size').value = String(Math.round(dmStyle.scale * 100));

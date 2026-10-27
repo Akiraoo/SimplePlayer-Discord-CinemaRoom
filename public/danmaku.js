@@ -19,7 +19,7 @@ export class Danmaku {
     this.paused = false;
     this.chatMode = 'panel'; // YouTube chat: 'panel' | 'scroll'
     this.scale = 1; // text size (1 = default)
-    this.area = 0.75; // share of the screen height comments may use
+    this.area = 0.5; // share of the screen height comments may use
   }
 
   /** Viewer settings: size 0.5–2, opacity 0.1–1, area 0.25–1. */
@@ -33,7 +33,8 @@ export class Danmaku {
 
   size() {
     const h = this.layer.clientHeight || 360;
-    const font = Math.max(16, Math.min(40, h / 16)) * this.scale;
+    // 100% = about 1/32 of the video height (the YouTube chat panel has its own size)
+    const font = Math.max(11, Math.min(20, h / 32)) * this.scale;
     return { w: this.layer.clientWidth || 640, h, font, lane: font * 1.25 };
   }
 
