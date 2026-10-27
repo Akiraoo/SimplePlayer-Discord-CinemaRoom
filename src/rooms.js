@@ -43,6 +43,7 @@ class Room {
     this.queue = [];
     this.groups = new Map(); // playlist key -> { title, thumb, url, site, by }
     this.index = -1;
+    this.seekGen = 0; // bumped on every jump in position: the players snap to it
     this.playing = false;
     this.pos = 0;
     this.ref = Date.now();
@@ -115,6 +116,7 @@ class Room {
       index: this.index,
       playing: this.playing,
       ready: this.ready,
+      seek: this.seekGen,
       pos: this.position(),
       now: Date.now(),
       viewers: [...new Set([...this.clients.values()].map((u) => u.name))],
@@ -143,12 +145,19 @@ class Room {
         return this.removeGroup(msg.group);
       case 'move':
         return this.move(msg.key, Number(msg.dir));
-      case 'jump':
-        return this.jump(this.queue.findIndex((it) => it.key === msg.key));
+      case 'jump': {
+        const i = this.queue.findIndex((it) => it.key === msg.key);
+        return i >= 0 && this.jump(i);
+      }
       case 'next':
         return this.jump(this.index + 1);
       case 'prev':
-        return this.jump(Math.max(0, this.index - 1));
+        // played videos are gone from the list: "back" starts this one over
+        if (!this.current || this.current.live) return;
+        this.pos = 0;
+        this.ref = Date.now();
+        this.seekGen++;
+        return this.broadcast();
       case 'play':
         if (this.ended && this.current) {
           // played to the end: start it over
@@ -174,6 +183,7 @@ class Room {
         if (!Number.isFinite(t)) return;
         this.pos = Math.max(0, cur.duration ? Math.min(t, cur.duration) : t);
         this.ref = Date.now();
+        this.seekGen++;
         this.ended = false;
         return this.broadcast();
       }
@@ -307,21 +317,37 @@ class Room {
       .catch(() => {});
   }
 
+  /**
+   * Plays item `i`. The item that was playing is taken off the list (played or skipped
+   * videos don't stay). Past the end: back to anything still left at the top, or idle.
+   */
   jump(i) {
-    if (i < 0 || i >= this.queue.length) {
-      if (i >= this.queue.length && this.queue.length) {
-        // past the end: stop after the last one
-        this.unload();
-        this.ended = true;
-        this.index = this.queue.length;
-        this.playing = false;
-        this.broadcast();
-      }
-      return;
+    const old = this.index;
+    if (this.current && i !== old) {
+      this.drop(old);
+      if (i > old) i--;
+    }
+    if (i >= this.queue.length) i = 0;
+    if (i < 0 || !this.queue.length) {
+      this.unload();
+      this.index = -1;
+      this.playing = false;
+      this.ended = false;
+      return this.broadcast();
     }
     this.index = i;
     this.ended = false;
     this.load();
+  }
+
+  /** Takes item `i` off the list (without changing what plays). */
+  drop(i) {
+    const it = this.queue[i];
+    if (!it) return;
+    this.queue.splice(i, 1);
+    this.vod.delete(it.key);
+    if (it.group && !this.queue.some((x) => x.group === it.group)) this.groups.delete(it.group);
+    if (i < this.index) this.index--;
   }
 
   skipSoon() {
@@ -469,13 +495,7 @@ class Room {
     const cur = this.current;
     if (!cur || cur.live || !this.playing || !this.ready || !cur.duration) return;
     if (this.position() >= cur.duration - 0.05 && Date.now() - this.ref > 1500) {
-      if (this.index + 1 < this.queue.length) this.jump(this.index + 1);
-      else {
-        this.pos = cur.duration;
-        this.playing = false;
-        this.ended = true;
-        this.broadcast();
-      }
+      this.jump(this.index + 1);
     }
   }
 

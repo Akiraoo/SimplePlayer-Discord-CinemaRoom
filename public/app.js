@@ -198,6 +198,7 @@ function onState(s) {
   else if (cur.status === 'error') center(`無法播放：${shortError(cur.error)}`);
   else if (cur.status === 'resolving') center('讀取中…');
   else if (cur.status !== 'ready') center(cur.live ? '準備直播中…' : '準備影片中…（第一次播放要等幾秒）');
+  else if (s.stalled) center('緩衝中…（下載跟不上播放，等一下會自動繼續）');
   else if (!needClick) center('');
   $('btn-play').textContent = s.playing ? '⏸' : '▶';
   $('seek').disabled = !cur || cur.live || !cur.duration;
@@ -357,7 +358,7 @@ function load(src, item) {
 function target() {
   if (!state) return 0;
   let p = state.pos;
-  if (state.playing && state.ready) p += (serverNow() - state.now) / 1000;
+  if (state.playing && state.ready && !state.stalled) p += (serverNow() - state.now) / 1000;
   const cur = state.queue[state.index];
   return cur?.duration ? Math.min(p, cur.duration) : p;
 }
@@ -377,10 +378,30 @@ async function tryPlay() {
   }
 }
 
+// watchdog: a player that should be playing but hasn't moved for a while gets reloaded
+let lastT = -1;
+let stuck = 0;
+function watchdog(cur) {
+  if (!state?.playing || state.stalled || needClick || !currentMedia) {
+    stuck = 0;
+    return;
+  }
+  if (Math.abs(video.currentTime - lastT) < 0.05) stuck++;
+  else stuck = 0;
+  lastT = video.currentTime;
+  if (stuck >= 15) {
+    stuck = 0;
+    console.warn('player stuck: reloading');
+    load(currentMedia, cur);
+    snap = true;
+  }
+}
+
 function sync() {
   const cur = state?.queue[state.index];
+  watchdog(cur);
   if (!cur || !currentMedia || video.readyState < 1) return;
-  if (state.playing && video.paused) {
+  if (state.playing && !state.stalled && video.paused) {
     // a live stream resumes at the live edge, not where it was paused
     if (cur.live && hls?.liveSyncPosition) video.currentTime = hls.liveSyncPosition;
     tryPlay();
@@ -391,7 +412,8 @@ function sync() {
   }
   const want = target();
   const drift = video.currentTime - want;
-  if (!state.playing) {
+  if (!state.playing || state.stalled) {
+    if (!video.paused) video.pause();
     if (Math.abs(drift) > 0.3) video.currentTime = want;
     video.playbackRate = 1;
     return;
