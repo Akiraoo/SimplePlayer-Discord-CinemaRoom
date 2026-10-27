@@ -1,0 +1,28 @@
+[Unit]
+Description=CinemaRoom (Discord Activity)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=cinemaroom
+Group=cinemaroom
+WorkingDirectory=/opt/cinemaroom
+Environment=YTDLP=/usr/local/bin/yt-dlp
+Environment=CACHE_DIR=/var/cache/cinemaroom
+ExecStart=/usr/bin/node --env-file=.env src/index.js
+Restart=always
+RestartSec=5
+# yt-dlp keeps a cache in the home folder
+Environment=HOME=/opt/cinemaroom
+Environment=XDG_CACHE_HOME=/opt/cinemaroom/.cache
+CacheDirectory=cinemaroom
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/cinemaroom
+
+[Install]
+WantedBy=multi-user.target

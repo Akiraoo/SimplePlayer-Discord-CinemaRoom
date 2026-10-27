@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>CinemaRoom</title>
+<link rel="stylesheet" href="style.css?v=1">
+</head>
+<body>
+<div id="stage">
+  <video id="video" playsinline></video>
+  <div id="danmaku"></div>
+  <div id="chat" hidden></div>
+  <div id="center" hidden><div id="center-text"></div></div>
+
+  <div id="top" class="bar">
+    <div id="title">CinemaRoom</div>
+    <div id="viewers"></div>
+    <button id="btn-queue" class="icon" title="清單">☰</button>
+  </div>
+
+  <div id="bottom" class="bar">
+    <input id="seek" type="range" min="0" max="1000" value="0" step="1">
+    <div class="row">
+      <button id="btn-prev" class="icon" title="上一個">⏮</button>
+      <button id="btn-play" class="icon" title="播放／暫停">▶</button>
+      <button id="btn-next" class="icon" title="下一個">⏭</button>
+      <span id="time">0:00 / 0:00</span>
+      <span class="grow"></span>
+      <button id="btn-dm" class="pill on" title="彈幕開關">彈</button>
+      <button id="btn-chatmode" class="pill" title="聊天室顯示方式" hidden>側邊</button>
+      <input id="volume" type="range" min="0" max="100" value="80" title="音量（只影響你自己）">
+    </div>
+  </div>
+
+  <aside id="queue" hidden>
+    <div class="qhead"><b>播放清單</b><button id="btn-close" class="icon" title="關閉">✕</button></div>
+    <form id="add">
+      <input id="add-url" type="url" placeholder="貼上 B站／niconico 影片或直播、YouTube 直播的網址" autocomplete="off" required>
+      <button type="submit" class="pill on">加入</button>
+    </form>
+    <ol id="items"></ol>
+    <div id="hint">誰都可以加入、跳過、暫停，大家看到的是同一個畫面。</div>
+  </aside>
+
+  <div id="toast" hidden></div>
+</div>
+<script src="vendor/hls.min.js?v=1"></script>
+<script type="module" src="app.js?v=1"></script>
+</body>
+</html>
