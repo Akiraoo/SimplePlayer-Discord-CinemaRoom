@@ -18,11 +18,22 @@ export class Danmaku {
     this.enabled = true;
     this.paused = false;
     this.chatMode = 'panel'; // YouTube chat: 'panel' | 'scroll'
+    this.scale = 1; // text size (1 = default)
+    this.area = 0.75; // share of the screen height comments may use
+  }
+
+  /** Viewer settings: size 0.5–2, opacity 0.1–1, area 0.25–1. */
+  setStyle({ scale, opacity, area }) {
+    if (scale) this.scale = scale;
+    if (area) this.area = area;
+    if (opacity) this.layer.parentElement?.style.setProperty('--dm-opacity', String(opacity));
+    this.layer.parentElement?.style.setProperty('--dm-scale', String(this.scale));
+    this.clear(); // lanes depend on the size
   }
 
   size() {
     const h = this.layer.clientHeight || 360;
-    const font = Math.max(16, Math.min(40, h / 16));
+    const font = Math.max(16, Math.min(40, h / 16)) * this.scale;
     return { w: this.layer.clientWidth || 640, h, font, lane: font * 1.25 };
   }
 
@@ -110,7 +121,7 @@ export class Danmaku {
     const el = document.createElement('div');
     el.className = c.paid ? 'c paid' : 'c';
     const px = font * (c.size === 'big' ? 1.35 : c.size === 'small' ? 0.75 : 1);
-    el.style.fontSize = `calc(${px}px * var(--dm-scale))`;
+    el.style.fontSize = `${px}px`;
     el.style.color = c.color || '#fff';
     if (c.kind === 'chat' && c.user) {
       const u = document.createElement('span');
@@ -123,7 +134,8 @@ export class Danmaku {
     const width = el.offsetWidth;
     const now = performance.now();
     const mode = c.mode === 'top' || c.mode === 'bottom' ? c.mode : 'scroll';
-    const count = Math.max(1, Math.floor((mode === 'scroll' ? h * 0.85 : h * 0.5) / lane));
+    // scrolling comments use the top `area` of the screen; top / bottom ones half of it each
+    const count = Math.max(1, Math.floor(((mode === 'scroll' ? 1 : 0.5) * h * this.area) / lane));
     let a;
     if (mode === 'scroll') {
       const speed = (w + 120) / SCROLL_SECONDS; // px per second, the same for every comment

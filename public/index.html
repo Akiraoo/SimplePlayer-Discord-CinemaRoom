@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>CinemaRoom</title>
-<link rel="stylesheet" href="style.css?v=1">
+<link rel="stylesheet" href="style.css?v=2">
 </head>
 <body>
 <div id="stage">
@@ -28,9 +28,21 @@
       <span id="time">0:00 / 0:00</span>
       <span class="grow"></span>
       <button id="btn-dm" class="pill on" title="彈幕開關">彈</button>
+      <button id="btn-dmset" class="icon" title="彈幕設定">⚙</button>
       <button id="btn-chatmode" class="pill" title="聊天室顯示方式" hidden>側邊</button>
       <input id="volume" type="range" min="0" max="100" value="80" title="音量（只影響你自己）">
     </div>
+  </div>
+
+  <div id="dmset" hidden>
+    <div class="set-row"><span>大小</span><input id="dm-size" type="range" min="50" max="200" step="10"><b id="dm-size-v"></b></div>
+    <div class="set-row"><span>不透明度</span><input id="dm-opacity" type="range" min="10" max="100" step="5"><b id="dm-opacity-v"></b></div>
+    <div class="set-row"><span>顯示範圍</span>
+      <div class="seg" id="dm-area">
+        <button data-v="0.25">1/4</button><button data-v="0.5">半屏</button><button data-v="0.75">3/4</button><button data-v="1">全屏</button>
+      </div>
+    </div>
+    <div class="set-note">只影響你自己的畫面</div>
   </div>
 
   <aside id="queue" hidden>
@@ -39,6 +51,10 @@
       <input id="add-url" type="url" placeholder="貼上 B站／niconico 影片或直播、YouTube 直播的網址" autocomplete="off" required>
       <button type="submit" class="pill on">加入</button>
     </form>
+    <div id="preview" hidden>
+      <div class="th" id="pv-th"></div>
+      <div class="pv-body"><div class="t" id="pv-title"></div><div class="s" id="pv-meta"></div></div>
+    </div>
     <ol id="items"></ol>
     <div id="hint">誰都可以加入、跳過、暫停，大家看到的是同一個畫面。</div>
   </aside>
@@ -46,6 +62,6 @@
   <div id="toast" hidden></div>
 </div>
 <script src="vendor/hls.min.js?v=1"></script>
-<script type="module" src="app.js?v=1"></script>
+<script type="module" src="app.js?v=2"></script>
 </body>
 </html>

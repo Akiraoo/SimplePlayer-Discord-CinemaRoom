@@ -6,8 +6,8 @@
 // goes through Discord's proxy (and any CDN) much better than Range requests.
 
 import { spawn } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { createHash, randomBytes } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { config } from './config.js';
@@ -79,8 +79,50 @@ export function siteOf(info) {
   return ex || 'other';
 }
 
+/* What yt-dlp found for a link, kept a few minutes: the preview, adding it to the list and
+   starting the download then need only one look-up (the download reuses it with
+   --load-info-json instead of asking the site again, so playback starts sooner). */
+const infos = new Map(); // url -> { at, raw, summary }
+const pending = new Map(); // url -> Promise
+const INFO_FRESH = 4 * 60_000;
+
+function remember(urls, raw, summary) {
+  const entry = { at: Date.now(), raw, summary };
+  for (const u of urls) infos.set(u, entry);
+  for (const [u, e] of infos) if (Date.now() - e.at > INFO_FRESH) infos.delete(u);
+}
+
+/** yt-dlp's full info for a link, if it was looked up recently enough to still be valid. */
+export function freshInfo(url, maxAge = INFO_FRESH) {
+  const e = infos.get(url);
+  return e && Date.now() - e.at < maxAge ? e.raw : null;
+}
+
+/* cover pictures go through this server (the Activity can't load other sites) */
+const thumbs = new Map(); // id -> url
+export function thumbPath(url) {
+  if (!url) return null;
+  const id = createHash('sha1').update(url).digest('hex').slice(0, 20);
+  thumbs.set(id, url);
+  if (thumbs.size > 1000) thumbs.delete(thumbs.keys().next().value);
+  return `/thumb/${id}`;
+}
+export function thumbUrl(id) {
+  return thumbs.get(id) || null;
+}
+
 /** Title, length and where the comments are, from a link. */
-export async function resolve(url) {
+export function resolve(url) {
+  const hit = infos.get(url);
+  if (hit && Date.now() - hit.at < INFO_FRESH) return Promise.resolve({ ...hit.summary });
+  if (!pending.has(url)) {
+    const p = lookUp(url).finally(() => pending.delete(url));
+    pending.set(url, p);
+  }
+  return pending.get(url).then((s) => ({ ...s }));
+}
+
+async function lookUp(url) {
   const out = await run(['-J', '--write-subs', '--sub-langs', 'danmaku,comments', '-f', formatSelector(false), '--', url]);
   const info = JSON.parse(out);
   if (info._type === 'playlist') {
@@ -101,7 +143,7 @@ export async function resolve(url) {
   else if (live && site === 'niconico') liveComments = { type: 'nico', url: page };
   else if (live && site === 'youtube') liveComments = { type: 'youtube', url: page };
   const thumb = [info.thumbnail, ...(info.thumbnails || []).map((t) => t.url).reverse()].find((t) => /^https:\/\//.test(t || ''));
-  return {
+  const summary = {
     url: page,
     title: String(info.title || info.fulltitle || page).slice(0, 200),
     uploader: String(info.uploader || info.channel || '').slice(0, 80),
@@ -112,6 +154,8 @@ export async function resolve(url) {
     comments,
     liveComments,
   };
+  remember([url, page], out, summary);
+  return summary;
 }
 
 /* ---------------- HLS jobs ---------------- */
@@ -177,13 +221,21 @@ export class Job {
 
   start() {
     mkdirSync(this.dir, { recursive: true });
-    const yt = spawn(config.ytdlp, [...baseArgs(), '-f', formatSelector(this.live), '-o', '-', '--', this.url], {
+    // reuse the look-up from a moment ago (live stream addresses go stale faster)
+    const raw = freshInfo(this.url, this.live ? 60_000 : INFO_FRESH);
+    let source = ['--', this.url];
+    if (raw) {
+      const file = path.join(this.dir, 'info.json');
+      writeFileSync(file, raw);
+      source = ['--load-info-json', file];
+    }
+    const yt = spawn(config.ytdlp, [...baseArgs(), '-f', formatSelector(this.live), '-o', '-', ...source], {
       stdio: ['ignore', 'pipe', 'pipe'],
       env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
     });
     const hls = this.live
       ? ['-hls_time', '2', '-hls_list_size', '10', '-hls_flags', 'delete_segments+independent_segments']
-      : ['-hls_time', '4', '-hls_playlist_type', 'event', '-hls_flags', 'independent_segments'];
+      : ['-hls_time', '2', '-hls_playlist_type', 'event', '-hls_flags', 'independent_segments'];
     const ff = spawn(
       config.ffmpeg,
       [
@@ -302,7 +354,8 @@ setInterval(trim, 15_000).unref();
 
 export function mediaFile(jobId, name) {
   const job = jobs.get(jobId);
-  if (!job || !/^[\w.-]+$/.test(name)) return null;
+  // only the playlist and its segments (info.json may hold cookies)
+  if (!job || !/^[\w-]+\.(m3u8|m4s|mp4)$/.test(name)) return null;
   const file = path.join(job.dir, name);
   if (!existsSync(file)) return null;
   job.lastUsed = Date.now();

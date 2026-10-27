@@ -9,7 +9,7 @@ import { config } from './config.js';
 import { BiliLive, fetchVod as biliVod, roomFromUrl } from './danmaku/bilibili.js';
 import { NicoLive, parseVod as nicoVod } from './danmaku/niconico.js';
 import { YouTubeChat } from './danmaku/youtube.js';
-import { acquire, baseArgs, release, resolve } from './media.js';
+import { acquire, baseArgs, release, resolve, thumbPath } from './media.js';
 
 const rooms = new Map();
 
@@ -103,7 +103,7 @@ class Room {
       queue: this.queue.map((it) => {
         const o = {};
         for (const k of PUBLIC) if (it[k] !== undefined) o[k] = it[k];
-        if (it.thumb) o.thumb = `/thumb/${this.id}/${it.key}`;
+        if (it.thumb) o.thumb = thumbPath(it.thumb);
         return o;
       }),
       index: this.index,
@@ -372,9 +372,6 @@ class Room {
     }
   }
 
-  thumb(key) {
-    return this.queue.find((it) => it.key === key)?.thumb || null;
-  }
 }
 
 export function findRoom(id) {

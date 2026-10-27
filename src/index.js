@@ -7,7 +7,7 @@
 //   /api/token        swaps the SDK's one-time code for an access token
 //   /ws               the room: commands in, state / comments out
 //   /media/<job>/…    HLS playlists and segments
-//   /thumb/<room>/<item>  cover pictures (fetched here: the Activity can't load other sites)
+//   /thumb/<id>       cover pictures (fetched here: the Activity can't load other sites)
 
 import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs';
 import http from 'node:http';
@@ -17,9 +17,9 @@ import { WebSocketServer } from 'ws';
 
 import { checkConfig, config } from './config.js';
 import { allowed, exchangeCode, whoIs } from './discord.js';
-import { clearCache, mediaFile } from './media.js';
+import { clearCache, mediaFile, resolve, thumbPath, thumbUrl } from './media.js';
 import { request } from './net.js';
-import { findRoom, room, roomCount } from './rooms.js';
+import { room, roomCount } from './rooms.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PUBLIC = path.join(ROOT, 'public');
@@ -73,8 +73,8 @@ function serveFile(res, file, cache) {
 
 const thumbs = new Map(); // url -> { type, body, at }
 
-async function serveThumb(res, roomId, key) {
-  const url = findRoom(roomId)?.thumb(key);
+async function serveThumb(res, id) {
+  const url = thumbUrl(id);
   if (!url) return sendJson(res, 404, { error: 'not found' });
   let hit = thumbs.get(url);
   if (!hit || (!hit.body && Date.now() - hit.at > 10 * 60_000)) {
@@ -111,8 +111,8 @@ const server = http.createServer(async (req, res) => {
       // playlists change while a video is being prepared / a stream runs; segments never do
       return serveFile(res, f.file, m[2].endsWith('.m3u8') ? 'no-cache' : 'public, max-age=86400, immutable');
     }
-    m = /^\/thumb\/([^/]+)\/([0-9a-f]+)$/.exec(p);
-    if (m) return await serveThumb(res, m[1], m[2]);
+    m = /^\/thumb\/([0-9a-f]{20})$/.exec(p);
+    if (m) return await serveThumb(res, m[1]);
     // the Activity page
     const rel = p === '/' ? 'index.html' : p.slice(1);
     const file = path.join(PUBLIC, rel);
@@ -140,6 +140,7 @@ server.on('upgrade', (req, socket, head) => {
 
 wss.on('connection', (ws) => {
   let joined = null; // { room, user }
+  let previewing = false;
   let alive = true;
   ws.on('pong', () => {
     alive = true;
@@ -171,6 +172,21 @@ wss.on('connection', (ws) => {
         return say({ type: 'welcome', user: who.user });
       }
       if (!joined) throw new Error('還沒登入');
+      if (msg.type === 'preview') {
+        // title / cover of a link before it is added (one look-up at a time per viewer)
+        const url = String(msg.url || '').trim();
+        if (!/^https?:\/\/\S+$/i.test(url) || previewing) return;
+        previewing = true;
+        try {
+          const i = await resolve(url);
+          say({ type: 'preview', url, info: { title: i.title, uploader: i.uploader, duration: i.duration, live: i.live, site: i.site, thumb: thumbPath(i.thumb) } });
+        } catch (e) {
+          say({ type: 'preview', url, error: e.message });
+        } finally {
+          previewing = false;
+        }
+        return;
+      }
       joined.room.command(joined.user, msg);
     } catch (e) {
       say({ type: 'error', text: e.message });

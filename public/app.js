@@ -1,7 +1,7 @@
 // The Activity page: Discord sign-in, the room connection, the synced player and the
 // comment overlay. The server decides what plays and where; this page follows it.
 
-import { Danmaku } from './danmaku.js?v=1';
+import { Danmaku } from './danmaku.js?v=2';
 
 const $ = (id) => document.getElementById(id);
 const video = $('video');
@@ -42,6 +42,15 @@ function center(text, clickable = false) {
   c.hidden = !text;
   c.classList.toggle('click', clickable);
   $('center-text').textContent = text || '';
+}
+
+/** The useful part of a long error (yt-dlp likes to append links and causes). */
+function shortError(e) {
+  return String(e || '')
+    .replace(/\s*\(caused by[\s\S]*$/, '')
+    .replace(/;?\s*please report this issue[\s\S]*$/i, '')
+    .replace(/\s*See https?:\S+[\s\S]*$/, '')
+    .slice(0, 160);
 }
 
 /* ---------- sign-in ---------- */
@@ -123,6 +132,8 @@ function connect() {
       } else pendingComments.set(msg.key, msg.list);
     } else if (msg.type === 'live') {
       if (msg.key === currentKey) dm.push(msg.items);
+    } else if (msg.type === 'preview') {
+      showPreview(msg);
     } else if (msg.type === 'notice') {
       if (msg.text) toast(msg.text);
     } else if (msg.type === 'error') toast(msg.text);
@@ -175,9 +186,9 @@ function onState(s) {
     load(media, cur);
   }
   const last = s.queue[s.queue.length - 1];
-  if (!cur && last?.status === 'error') center(`無法播放：${last.error || ''}`);
+  if (!cur && last?.status === 'error') center(`無法播放：${shortError(last.error)}`);
   else if (!cur) center(s.queue.length ? '清單播完了' : '按右上角 ☰ 加入影片或直播的網址');
-  else if (cur.status === 'error') center(`無法播放：${cur.error || ''}`);
+  else if (cur.status === 'error') center(`無法播放：${shortError(cur.error)}`);
   else if (cur.status === 'resolving') center('讀取中…');
   else if (cur.status !== 'ready') center(cur.live ? '準備直播中…' : '準備影片中…（第一次播放要等幾秒）');
   else if (!needClick) center('');
@@ -208,7 +219,7 @@ function renderQueue(s) {
       if (it.status === 'error') {
         const e = document.createElement('span');
         e.className = 'err';
-        e.textContent = it.error || '錯誤';
+        e.textContent = shortError(it.error) || '錯誤';
         st.append(e);
       } else {
         st.append(document.createTextNode(`${it.duration ? fmt(it.duration) + ' · ' : ''}${it.by || ''}`));
@@ -368,7 +379,51 @@ $('add').onsubmit = (e) => {
   if (!url) return;
   sendCmd({ type: 'add', url });
   $('add-url').value = '';
+  $('preview').hidden = true;
+  previewUrl = '';
 };
+
+// a pasted link shows its cover and title before it is added
+let previewUrl = '';
+let previewTimer = 0;
+$('add-url').addEventListener('input', () => {
+  clearTimeout(previewTimer);
+  const url = $('add-url').value.trim();
+  if (!/^https?:\/\/\S+\.\S+/.test(url)) {
+    $('preview').hidden = true;
+    previewUrl = '';
+    return;
+  }
+  previewTimer = setTimeout(() => {
+    if (url === previewUrl) return;
+    previewUrl = url;
+    $('preview').hidden = false;
+    $('pv-th').style.backgroundImage = '';
+    $('pv-title').textContent = '讀取中…';
+    $('pv-meta').textContent = '';
+    $('pv-meta').className = 's';
+    sendCmd({ type: 'preview', url });
+  }, 500);
+});
+
+function showPreview(msg) {
+  if (msg.url !== previewUrl) return; // the box has changed since
+  $('preview').hidden = false;
+  if (msg.error) {
+    $('pv-title').textContent = '讀不到這個網址';
+    $('pv-meta').textContent = shortError(msg.error);
+    $('pv-meta').className = 's err';
+    return;
+  }
+  const i = msg.info;
+  $('pv-th').style.backgroundImage = i.thumb ? `url("${i.thumb}")` : '';
+  $('pv-title').textContent = i.title;
+  const site = SITE[i.site] || i.site || '';
+  $('pv-meta').textContent = [i.live ? '🔴 直播中' : site, i.live ? site : i.duration ? fmt(i.duration) : '', i.uploader]
+    .filter(Boolean)
+    .join(' · ');
+  $('pv-meta').className = 's';
+}
 $('center').onclick = () => needClick && tryPlay();
 
 const dmOn = store.get('dm', true);
@@ -383,6 +438,39 @@ $('btn-dm').onclick = () => {
 dm.chatMode = store.get('chatMode', 'panel');
 const chatLabel = () => ($('btn-chatmode').textContent = dm.chatMode === 'panel' ? '側邊' : '彈幕');
 chatLabel();
+// comment look: size, opacity, how much of the screen they may cover (per viewer)
+const dmStyle = { scale: store.get('dmScale', 1), opacity: store.get('dmOpacity', 0.9), area: store.get('dmArea', 0.75) };
+function applyDmStyle() {
+  dm.setStyle(dmStyle);
+  $('dm-size').value = String(Math.round(dmStyle.scale * 100));
+  $('dm-size-v').textContent = `${Math.round(dmStyle.scale * 100)}%`;
+  $('dm-opacity').value = String(Math.round(dmStyle.opacity * 100));
+  $('dm-opacity-v').textContent = `${Math.round(dmStyle.opacity * 100)}%`;
+  for (const b of $('dm-area').children) b.classList.toggle('on', Number(b.dataset.v) === dmStyle.area);
+}
+applyDmStyle();
+$('btn-dmset').onclick = () => ($('dmset').hidden = !$('dmset').hidden);
+$('dm-size').oninput = () => {
+  dmStyle.scale = Number($('dm-size').value) / 100;
+  store.set('dmScale', dmStyle.scale);
+  applyDmStyle();
+};
+$('dm-opacity').oninput = () => {
+  dmStyle.opacity = Number($('dm-opacity').value) / 100;
+  store.set('dmOpacity', dmStyle.opacity);
+  applyDmStyle();
+};
+for (const b of $('dm-area').children) {
+  b.onclick = () => {
+    dmStyle.area = Number(b.dataset.v);
+    store.set('dmArea', dmStyle.area);
+    applyDmStyle();
+  };
+}
+$('danmaku').parentElement.addEventListener('pointerdown', (e) => {
+  if (!$('dmset').hidden && !$('dmset').contains(e.target) && e.target !== $('btn-dmset')) $('dmset').hidden = true;
+});
+
 $('btn-chatmode').onclick = () => {
   dm.chatMode = dm.chatMode === 'panel' ? 'scroll' : 'panel';
   $('chat').replaceChildren();
