@@ -97,7 +97,7 @@ class Room {
     const cur = this.current;
     if (!cur || cur.live) return 0;
     let p = this.pos;
-    if (this.playing && this.ready) p += (Date.now() - this.ref) / 1000;
+    if (this.playing && this.ready && !this.stalled) p += (Date.now() - this.ref) / 1000;
     return cur.duration ? Math.min(p, cur.duration) : p;
   }
 
@@ -116,6 +116,7 @@ class Room {
       index: this.index,
       playing: this.playing,
       ready: this.ready,
+      stalled: this.stalled,
       seek: this.seekGen,
       pos: this.position(),
       now: Date.now(),
@@ -377,6 +378,7 @@ class Room {
     clearTimeout(this.advanceTimer);
     this.unload();
     this.ready = false;
+    this.stalled = false;
     this.pos = 0;
     this.ref = Date.now();
     this.playing = true;
@@ -411,7 +413,7 @@ class Room {
     }
     item.status = 'preparing';
     item.error = undefined;
-    const job = acquire(item.url, item.live);
+    const job = acquire(item.url, item.live, item.duration);
     this.job = job;
     const onJob = (j) => {
       if (this.job !== j) return;
@@ -493,7 +495,28 @@ class Room {
 
   onTick() {
     const cur = this.current;
-    if (!cur || cur.live || !this.playing || !this.ready || !cur.duration) return;
+    if (!cur || cur.live || !this.playing || !this.ready) return;
+    // the download is slower than playback: hold everyone's clock until there is a lead again
+    // (otherwise each player runs into the end of what exists and stops)
+    const job = this.job;
+    if (job && job.state !== 'done') {
+      const pos = this.position();
+      if (!this.stalled && pos > job.generated - 2) {
+        this.pos = pos;
+        this.stalled = true;
+        return this.broadcast();
+      }
+      if (this.stalled && job.generated >= pos + 10) {
+        this.stalled = false;
+        this.ref = Date.now();
+        return this.broadcast();
+      }
+    } else if (this.stalled) {
+      this.stalled = false;
+      this.ref = Date.now();
+      this.broadcast();
+    }
+    if (!cur.duration || this.stalled) return;
     if (this.position() >= cur.duration - 0.05 && Date.now() - this.ref > 1500) {
       this.jump(this.index + 1);
     }
